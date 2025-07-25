@@ -1,0 +1,119 @@
+# .github/workflows/update-dashboard.yml
+name: 🚀 Daily Lightning Dashboard Update
+
+on:
+  schedule:
+    # Runs every day at 8 AM UTC (3 AM EST / 12 AM PST)
+    # Adjust the time as needed for your timezone
+    - cron: '0 8 * * *'
+  
+  # Allow manual triggering from GitHub Actions tab
+  workflow_dispatch:
+  
+  # Trigger on push to main branch (for immediate updates)
+  push:
+    branches: [ main ]
+
+jobs:
+  update-dashboard:
+    runs-on: ubuntu-latest
+    name: ⚡ Update Lightning Dashboard
+    
+    steps:
+    - name: 📥 Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: ⚡ Update timestamp and trigger rebuild
+      run: |
+        echo "⚡ Dashboard updated on $(date)" > last-update.txt
+        echo "Last automatic update: $(date)" >> README.md
+        echo "LAST_UPDATE=$(date)" >> $GITHUB_ENV
+        
+    - name: 🔄 Commit and push changes
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "Lightning Dashboard Bot ⚡"
+        git add .
+        git diff --staged --quiet || git commit -m "⚡ Daily dashboard update - $(date)"
+        git push || echo "No changes to push"
+
+  # Optional: Backup your Google Sheets data daily
+  backup-data:
+    runs-on: ubuntu-latest
+    name: 💾 Backup Google Sheets Data
+    needs: update-dashboard
+    if: github.event_name == 'schedule' # Only run on scheduled updates, not manual
+    
+    steps:
+    - name: 📥 Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: 📁 Create backup directory
+      run: |
+        mkdir -p data/backups
+        
+    - name: 💾 Download and backup Google Sheets data
+      run: |
+        # Primary backup URL (the one that works)
+        curl -L "https://docs.google.com/spreadsheets/d/1k5p9hv7EMeoxgZO6-57vtN4aDo9ZO-kJl9Uamr0LhRY/export?format=csv" \
+          -o "data/backups/backup-$(date +%Y-%m-%d).csv" || \
+        # Fallback to published URL if primary fails
+        curl -L "https://docs.google.com/spreadsheets/d/e/2PACX-1vR7K1FddUVH2Bhgi6641lZ20bN47SCltvZW3eklBO7Dso1kOAivDWfGGhwz-eOxz1dIeGs2l4CI-qbg/pub?output=csv" \
+          -o "data/backups/backup-$(date +%Y-%m-%d).csv"
+        
+        # Verify backup was created and has data
+        if [ -f "data/backups/backup-$(date +%Y-%m-%d).csv" ] && [ -s "data/backups/backup-$(date +%Y-%m-%d).csv" ]; then
+          echo "✅ Backup created successfully: $(wc -l data/backups/backup-$(date +%Y-%m-%d).csv)"
+        else
+          echo "❌ Backup failed or is empty"
+          exit 1
+        fi
+        
+    - name: 🗂️ Clean old backups (keep last 30 days)
+      run: |
+        # Keep only last 30 days of backups
+        find data/backups -name "backup-*.csv" -type f -mtime +30 -delete
+        echo "📊 Current backups:"
+        ls -la data/backups/ || echo "No backups found"
+        
+    - name: 📤 Commit backup to repository
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "Lightning Backup Bot 💾"
+        git add data/backups/
+        git diff --staged --quiet || git commit -m "💾 Daily data backup - $(date +%Y-%m-%d)"
+        git push || echo "No backup changes to push"
+
+  # Optional: Health check to verify dashboard is working
+  health-check:
+    runs-on: ubuntu-latest
+    name: 🏥 Dashboard Health Check
+    needs: update-dashboard
+    if: github.event_name == 'schedule'
+    
+    steps:
+    - name: 🔍 Test Google Sheets connectivity
+      run: |
+        echo "🔗 Testing Google Sheets URLs..."
+        
+        # Test primary URL
+        if curl -f -s "https://docs.google.com/spreadsheets/d/1k5p9hv7EMeoxgZO6-57vtN4aDo9ZO-kJl9Uamr0LhRY/export?format=csv" > /dev/null; then
+          echo "✅ Primary URL working"
+        else
+          echo "❌ Primary URL failed"
+        fi
+        
+        # Test published URL
+        if curl -f -s "https://docs.google.com/spreadsheets/d/e/2PACX-1vR7K1FddUVH2Bhgi6641lZ20bN47SCltvZW3eklBO7Dso1kOAivDWfGGhwz-eOxz1dIeGs2l4CI-qbg/pub?output=csv" > /dev/null; then
+          echo "✅ Published URL working"
+        else
+          echo "❌ Published URL failed"
+        fi
+        
+    - name: 📊 Verify data format
+      run: |
+        echo "📋 Checking data format..."
+        
+        # Download and check if it contains expected headers
+        curl -s "https://docs.google.com/spreadsheets/d/1k5p9hv7EMeoxgZO6-57vtN4aDo9ZO-kJl9Uamr0LhRY/export?format=csv" | head -1 | grep -q "Agent" && \
+        echo "✅ Data format looks good" || echo "❌ Data format issue detected"
